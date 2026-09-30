@@ -2,10 +2,13 @@ import { createSignal, onMount, Show, For, createEffect } from "solid-js";
 import {
   clearSession,
   createSubmission,
+  fetchReturns,
   fetchSubmission,
+  fetchSubmissionHistory,
   fetchSubmissions,
   getUser,
   login,
+  returnSubmission,
   setSession,
 } from "./api";
 
@@ -22,15 +25,148 @@ const roleLabel = {
 
 function readHash() {
   const raw = (location.hash || "#/").replace(/^#/, "") || "/";
-  const m = raw.match(/^\/detail\/(\d+)/);
+  let m = raw.match(/^\/detail\/(\d+)/);
   if (m) return { name: "detail", id: Number(m[1]) };
+  if (raw === "/returns") return { name: "returns", id: null };
   return { name: "home", id: null };
+}
+
+function ReturnDesk(props) {
+  const [reasons, setReasons] = createSignal({});
+  const [busyId, setBusyId] = createSignal(null);
+  const [localError, setLocalError] = createSignal("");
+
+  const returnable = () => props.rows().filter((r) => r.status === "done");
+
+  async function handleReturn(row) {
+    const reason = (reasons()[row.id] || "").trim();
+    setLocalError("");
+    try {
+      await returnSubmission(row.id, reason);
+      setReasons((m) => ({ ...m, [row.id]: "" }));
+      await props.onReturned(row.id);
+    } catch (err) {
+      setLocalError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section class="card">
+      <div class="toolbar">
+        <h2>打回台</h2>
+        <button type="button" class="ghost" onClick={props.reload} disabled={props.loading()}>
+          {props.loading() ? "刷新中…" : "刷新"}
+        </button>
+      </div>
+      <p class="hint">
+        仅「已完成」记录可打回。打回后单子回到待复核队列，结论清空、打回次数加一，
+        原因与次数写入履历；后台进程重新认领后会再次给出结论。
+      </p>
+      <Show when={!props.canReturn()}>
+        <p class="hint">当前为操作员账号，只能查看，打回须由复核员发起。</p>
+      </Show>
+      <Show when={localError()}>
+        <div class="banner error">{localError()}</div>
+      </Show>
+
+      <h3>可打回清单</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>刀具</th>
+            <th>刀补 µm</th>
+            <th>结论</th>
+            <th>已打回</th>
+            <th>打回原因</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={returnable()}>
+            {(row) => (
+              <tr>
+                <td>{row.tool_code}</td>
+                <td>{row.offset_um}</td>
+                <td class={row.verdict === "合格" ? "pass" : "fail"}>{row.verdict || "—"}</td>
+                <td>{row.return_count}</td>
+                <td>
+                  <input
+                    class="reason-input"
+                    placeholder="写明打回原因"
+                    value={reasons()[row.id] || ""}
+                    disabled={!props.canReturn()}
+                    onInput={(e) =>
+                      setReasons((m) => ({ ...m, [row.id]: e.currentTarget.value }))
+                    }
+                  />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    disabled={!props.canReturn() || busyId() === row.id}
+                    onClick={() => {
+                      setBusyId(row.id);
+                      handleReturn(row);
+                    }}
+                  >
+                    {busyId() === row.id ? "打回中…" : "打回"}
+                  </button>
+                </td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+      <Show when={!returnable().length}>
+        <p class="hint">暂无可打回的已完成记录</p>
+      </Show>
+
+      <h3>历史记录</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>刀具</th>
+            <th>原因</th>
+            <th>次数</th>
+            <th>打回人</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={props.returns()}>
+            {(h) => (
+              <tr>
+                <td>{new Date(h.created_at).toLocaleString()}</td>
+                <td>{h.tool_code}</td>
+                <td>{h.reason}</td>
+                <td>第 {h.return_count} 次</td>
+                <td>{h.returned_by || "—"}</td>
+                <td>
+                  <button type="button" class="ghost" onClick={() => props.goDetail(h.submission_id)}>
+                    详情
+                  </button>
+                </td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+      <Show when={!props.returns().length}>
+        <p class="hint">暂无打回历史</p>
+      </Show>
+    </section>
+  );
 }
 
 function App() {
   const [user, setUser] = createSignal(getUser());
   const [rows, setRows] = createSignal([]);
   const [detail, setDetail] = createSignal(null);
+  const [history, setHistory] = createSignal([]);
+  const [returns, setReturns] = createSignal([]);
   const [route, setRoute] = createSignal(readHash());
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
@@ -41,8 +177,14 @@ function App() {
   const [toolCode, setToolCode] = createSignal("");
   const [offsetUm, setOffsetUm] = createSignal("");
 
+  const canReturn = () => user()?.role === "auditor";
+
   function goHome() {
     location.hash = "#/";
+  }
+
+  function goReturns() {
+    location.hash = "#/returns";
   }
 
   function goDetail(id) {
@@ -53,12 +195,19 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchSubmissions();
-      setRows(data);
+      setRows(await fetchSubmissions());
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadReturns() {
+    try {
+      setReturns(await fetchReturns());
+    } catch (e) {
+      setError(e.message);
     }
   }
 
@@ -67,9 +216,11 @@ function App() {
     setError("");
     try {
       setDetail(await fetchSubmission(id));
+      setHistory(await fetchSubmissionHistory(id));
     } catch (e) {
       setError(e.message);
       setDetail(null);
+      setHistory([]);
     } finally {
       setLoading(false);
     }
@@ -81,6 +232,7 @@ function App() {
     if (user()) {
       if (route().name === "detail") loadDetail(route().id);
       else loadRows();
+      loadReturns();
     }
     return () => window.removeEventListener("hashchange", onHash);
   });
@@ -90,6 +242,10 @@ function App() {
     if (!user()) return;
     if (r.name === "detail" && r.id) loadDetail(r.id);
     if (r.name === "home") loadRows();
+    if (r.name === "returns") {
+      loadRows();
+      loadReturns();
+    }
   });
 
   async function handleLogin(e) {
@@ -105,6 +261,7 @@ function App() {
       setUser(getUser());
       goHome();
       await loadRows();
+      await loadReturns();
     } catch (err) {
       setError(err.message);
     }
@@ -115,6 +272,8 @@ function App() {
     setUser(null);
     setRows([]);
     setDetail(null);
+    setReturns([]);
+    setHistory([]);
     goHome();
   }
 
@@ -131,6 +290,14 @@ function App() {
     }
   }
 
+  async function handleReturned(id) {
+    await loadRows();
+    await loadReturns();
+    if (route().name === "detail" && route().id === id) {
+      await loadDetail(id);
+    }
+  }
+
   return (
     <div class="page">
       <header class="topbar">
@@ -138,20 +305,6 @@ function App() {
           <h1>数控刀补复核台</h1>
           <p class="hint">刀补绝对值不超过十二微米判合格，否则超差。后台认领进程用行锁跳过已占行领取待复核。</p>
         </div>
-        <Show when={user()}>
-          <nav class="topnav">
-            <a
-              href="#/"
-              class={route().name === "home" ? "active" : ""}
-              onClick={(e) => {
-                e.preventDefault();
-                goHome();
-              }}
-            >
-              复核总览
-            </a>
-          </nav>
-        </Show>
       </header>
 
       <Show when={error()}>
@@ -181,120 +334,186 @@ function App() {
               </label>
               <button type="submit">进入系统</button>
             </form>
-            <p class="hint">操作员 machinist / machine123456；复核员 auditor / audit123456（只读）</p>
+            <p class="hint">操作员 machinist / machine123456；复核员 auditor / audit123456（可发起打回）</p>
           </section>
         }
       >
-        <section class="card toolbar">
-          <div>
-            当前用户：<strong>{user().username}</strong>（{roleLabel[user().role] || user().role}）
-          </div>
-          <button type="button" class="ghost" onClick={handleLogout}>
-            退出
-          </button>
-        </section>
-
-        <Show when={route().name === "home"}>
-          <Show when={user().can_write}>
-            <section class="card">
-              <h2>提交刀补</h2>
-              <form onSubmit={handleSubmit} class="form inline">
-                <label>
-                  刀具编号
-                  <input
-                    placeholder="如 T01"
-                    value={toolCode()}
-                    onInput={(e) => setToolCode(e.currentTarget.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  刀补（微米）
-                  <input
-                    type="number"
-                    value={offsetUm()}
-                    onInput={(e) => setOffsetUm(e.currentTarget.value)}
-                    required
-                  />
-                </label>
-                <button type="submit">提交待复核</button>
-              </form>
-            </section>
-          </Show>
-
-          <section class="card">
-            <div class="toolbar">
-              <h2>复核列表</h2>
-              <button type="button" class="ghost" onClick={loadRows} disabled={loading()}>
-                {loading() ? "刷新中…" : "刷新"}
-              </button>
+        <div class="shell">
+          <aside class="sidebar">
+            <div class="userbox">
+              <strong>{user().username}</strong>
+              <span class="hint">（{roleLabel[user().role] || user().role}）</span>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>刀具</th>
-                  <th>刀补 µm</th>
-                  <th>状态</th>
-                  <th>结论</th>
-                  <th>提交时间</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={rows()}>
-                  {(row) => (
-                    <tr>
-                      <td>{row.tool_code}</td>
-                      <td>{row.offset_um}</td>
-                      <td>{statusLabel[row.status] || row.status}</td>
-                      <td class={row.verdict === "合格" ? "pass" : row.verdict === "超差" ? "fail" : ""}>
-                        {row.verdict || "—"}
-                      </td>
-                      <td>{new Date(row.created_at).toLocaleString()}</td>
-                      <td>
-                        <button type="button" class="ghost" onClick={() => goDetail(row.id)}>
-                          详情
-                        </button>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-            <Show when={!rows().length && !loading()}>
-              <p class="hint">暂无记录</p>
-            </Show>
-          </section>
-        </Show>
+            <button
+              type="button"
+              class={route().name === "home" ? "navitem active" : "navitem"}
+              onClick={goHome}
+            >
+              复核总览
+            </button>
+            <button
+              type="button"
+              class={route().name === "returns" ? "navitem active" : "navitem"}
+              onClick={goReturns}
+            >
+              打回台
+            </button>
+            <button type="button" class="navitem ghost" onClick={handleLogout}>
+              退出
+            </button>
+          </aside>
 
-        <Show when={route().name === "detail"}>
-          <section class="card">
-            <div class="toolbar">
-              <h2>刀补详情</h2>
-              <button type="button" class="ghost" onClick={goHome}>
-                返回总览
-              </button>
-            </div>
-            <Show when={detail()} fallback={<p class="hint">{loading() ? "加载中…" : "未找到记录"}</p>}>
-              {(d) => (
-                <div class="detail-grid">
-                  <p>编号：{d().id}</p>
-                  <p>刀具：{d().tool_code}</p>
-                  <p>刀补 µm：{d().offset_um}</p>
-                  <p>状态：{statusLabel[d().status] || d().status}</p>
-                  <p class={d().verdict === "合格" ? "pass" : d().verdict === "超差" ? "fail" : ""}>
-                    结论：{d().verdict || "—"}
-                  </p>
-                  <p>提交时间：{new Date(d().created_at).toLocaleString()}</p>
-                  <p>
-                    复核时间：
-                    {d().reviewed_at ? new Date(d().reviewed_at).toLocaleString() : "—"}
-                  </p>
+          <main class="content">
+            <Show when={route().name === "home"}>
+              <Show when={user().can_write}>
+                <section class="card">
+                  <h2>提交刀补</h2>
+                  <form onSubmit={handleSubmit} class="form inline">
+                    <label>
+                      刀具编号
+                      <input
+                        placeholder="如 T01"
+                        value={toolCode()}
+                        onInput={(e) => setToolCode(e.currentTarget.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      刀补（微米）
+                      <input
+                        type="number"
+                        value={offsetUm()}
+                        onInput={(e) => setOffsetUm(e.currentTarget.value)}
+                        required
+                      />
+                    </label>
+                    <button type="submit">提交待复核</button>
+                  </form>
+                </section>
+              </Show>
+
+              <section class="card">
+                <div class="toolbar">
+                  <h2>复核列表</h2>
+                  <button type="button" class="ghost" onClick={loadRows} disabled={loading()}>
+                    {loading() ? "刷新中…" : "刷新"}
+                  </button>
                 </div>
-              )}
+                <table>
+                  <thead>
+                    <tr>
+                      <th>刀具</th>
+                      <th>刀补 µm</th>
+                      <th>状态</th>
+                      <th>结论</th>
+                      <th>打回次数</th>
+                      <th>提交时间</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={rows()}>
+                      {(row) => (
+                        <tr>
+                          <td>{row.tool_code}</td>
+                          <td>{row.offset_um}</td>
+                          <td>{statusLabel[row.status] || row.status}</td>
+                          <td class={row.verdict === "合格" ? "pass" : row.verdict === "超差" ? "fail" : ""}>
+                            {row.verdict || "—"}
+                          </td>
+                          <td>{row.return_count}</td>
+                          <td>{new Date(row.created_at).toLocaleString()}</td>
+                          <td>
+                            <button type="button" class="ghost" onClick={() => goDetail(row.id)}>
+                              详情
+                            </button>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+                <Show when={!rows().length && !loading()}>
+                  <p class="hint">暂无记录</p>
+                </Show>
+              </section>
             </Show>
-          </section>
-        </Show>
+
+            <Show when={route().name === "returns"}>
+              <ReturnDesk
+                rows={rows}
+                returns={returns}
+                loading={loading}
+                canReturn={canReturn}
+                reload={() => {
+                  loadRows();
+                  loadReturns();
+                }}
+                onReturned={handleReturned}
+                goDetail={goDetail}
+              />
+            </Show>
+
+            <Show when={route().name === "detail"}>
+              <section class="card">
+                <div class="toolbar">
+                  <h2>刀补详情</h2>
+                  <button type="button" class="ghost" onClick={goHome}>
+                    返回总览
+                  </button>
+                </div>
+                <Show when={detail()} fallback={<p class="hint">{loading() ? "加载中…" : "未找到记录"}</p>}>
+                  {(d) => (
+                    <>
+                      <div class="detail-grid">
+                        <p>编号：{d().id}</p>
+                        <p>刀具：{d().tool_code}</p>
+                        <p>刀补 µm：{d().offset_um}</p>
+                        <p>状态：{statusLabel[d().status] || d().status}</p>
+                        <p class={d().verdict === "合格" ? "pass" : d().verdict === "超差" ? "fail" : ""}>
+                          结论：{d().verdict || "—"}
+                        </p>
+                        <p>打回次数：{d().return_count}</p>
+                        <p>提交时间：{new Date(d().created_at).toLocaleString()}</p>
+                        <p>
+                          复核时间：
+                          {d().reviewed_at ? new Date(d().reviewed_at).toLocaleString() : "—"}
+                        </p>
+                      </div>
+
+                      <h3>打回履历</h3>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>时间</th>
+                            <th>原因</th>
+                            <th>次数</th>
+                            <th>打回人</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <For each={history()}>
+                            {(h) => (
+                              <tr>
+                                <td>{new Date(h.created_at).toLocaleString()}</td>
+                                <td>{h.reason}</td>
+                                <td>第 {h.return_count} 次</td>
+                                <td>{h.returned_by || "—"}</td>
+                              </tr>
+                            )}
+                          </For>
+                        </tbody>
+                      </table>
+                      <Show when={!history().length}>
+                        <p class="hint">暂无打回履历</p>
+                      </Show>
+                    </>
+                  )}
+                </Show>
+              </section>
+            </Show>
+          </main>
+        </div>
       </Show>
     </div>
   );

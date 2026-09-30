@@ -49,6 +49,7 @@ class OffsetSubmission(models.Model):
         blank=True,
         related_name="submissions",
     )
+    return_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
@@ -57,3 +58,29 @@ class OffsetSubmission(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tool_code} {self.offset_um}µm"
+
+
+class ReturnHistory(models.Model):
+    """打回履历：每行对应一次复核员发起的打回。"""
+
+    submission = models.ForeignKey(
+        OffsetSubmission,
+        on_delete=models.CASCADE,
+        related_name="return_history",
+    )
+    reason = models.CharField(max_length=500)
+    returned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="returns_made",
+    )
+    return_count = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.submission_id} 第{self.return_count}次打回"

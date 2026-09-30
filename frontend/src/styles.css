@@ -13,7 +13,7 @@ body {
 }
 
 .page {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -48,6 +48,63 @@ body {
 .topnav a.active {
   background: #2563eb;
   color: #fff;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+
+.sidebar {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.5rem;
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.75rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.userbox {
+  padding: 0.35rem 0.5rem 0.6rem;
+  border-bottom: 1px solid #e5e9f0;
+  margin-bottom: 0.25rem;
+}
+
+.navitem {
+  text-align: left;
+  background: #e8edf5;
+  color: #1a2332;
+}
+
+.navitem.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.navitem.ghost {
+  margin-top: 0.35rem;
+}
+
+.content {
+  min-width: 0;
+}
+
+.content .card:first-child {
+  margin-top: 0;
+}
+
+.reason-input {
+  min-width: 220px;
+  width: 100%;
+}
+
+h3 {
+  margin: 1.1rem 0 0.25rem;
 }
 
 .detail-grid {
