@@ -21,11 +21,13 @@ def claim_one_pending():
     from django.db import transaction
 
     from desk.models import OffsetSubmission
-    from desk.services import apply_verdict
+    from desk.services import apply_verdict, with_row_lock
 
     with transaction.atomic():
         submission = (
-            OffsetSubmission.objects.select_for_update(skip_locked=True)
+            with_row_lock(
+                OffsetSubmission.objects, skip_locked=True
+            )
             .filter(status=OffsetSubmission.Status.PENDING)
             .order_by("created_at", "id")
             .first()

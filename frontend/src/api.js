@@ -60,3 +60,18 @@ export function createSubmission(tool_code, offset_um) {
     body: JSON.stringify({ tool_code, offset_um: Number(offset_um) }),
   });
 }
+
+export function returnSubmission(id, reason) {
+  return request(`/submissions/${id}/return`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchReturnHistory() {
+  return request("/return-history");
+}
+
+export function fetchSubmissionHistory(id) {
+  return request(`/submissions/${id}/history`);
+}

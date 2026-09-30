@@ -143,3 +143,116 @@ td {
   color: #b91c1c;
   font-weight: 600;
 }
+
+/* ---- 主内容 + 侧栏打回台 ---- */
+
+.layout {
+  display: block;
+}
+
+.layout.with-sidebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.sidebar {
+  position: sticky;
+  top: 1rem;
+}
+
+.sidebar .card {
+  margin-top: 0;
+}
+
+.return-desk h3 {
+  margin: 1.1rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.return-list,
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.return-item,
+.history-item {
+  border: 1px solid #e5e9f0;
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: #fafbfd;
+}
+
+.return-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.reason-box {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #c5ceda;
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}
+
+button.danger {
+  margin-top: 0.45rem;
+  background: #dc2626;
+}
+
+button.danger:disabled {
+  background: #f0a4a4;
+  cursor: wait;
+}
+
+button.link {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.history-title {
+  margin: 1.1rem 0 0.5rem;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.history-reason {
+  margin: 0.35rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 820px) {
+  .layout.with-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+}

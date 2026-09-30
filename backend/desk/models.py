@@ -17,12 +17,16 @@ class User(AbstractUser):
     def can_write(self) -> bool:
         return self.role == self.Role.MACHINIST
 
+    @property
+    def can_review(self) -> bool:
+        return self.role == self.Role.AUDITOR
+
 
 class OffsetSubmission(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "待复核"
         PROCESSING = "processing", "复核中"
-        DONE = "done", "已完成"
+        DONE = "done", "已结清"
 
     class Verdict(models.TextChoices):
         PASS = "合格", "合格"
@@ -42,6 +46,7 @@ class OffsetSubmission(models.Model):
         blank=True,
         default="",
     )
+    return_count = models.PositiveIntegerField(default=0)
     submitted_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -57,3 +62,29 @@ class OffsetSubmission(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tool_code} {self.offset_um}µm"
+
+
+class ReturnHistory(models.Model):
+    """打回履历：每次打回恰好写入一行，与清结论/回队在同一事务内完成。"""
+
+    submission = models.ForeignKey(
+        OffsetSubmission,
+        on_delete=models.CASCADE,
+        related_name="return_history",
+    )
+    reason = models.TextField()
+    return_count = models.PositiveIntegerField()
+    returned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="returns_made",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.submission_id} 第{self.return_count}次打回"
